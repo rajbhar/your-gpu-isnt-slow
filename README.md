@@ -21,7 +21,7 @@ In both systems, the GPUs enumerated and ran workloads correctly. The failure wa
 
 ## What this is about
 
-Today I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was well below what the link should sustain. Correcting the PCIe configuration improved host-to-device bandwidth by approximately 4.0x on the MI210 system and 4.5x on the W7900 system. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
+Today I set up two AMD GPU compute systems for ROCm work, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was well below what the link should sustain. Correcting the PCIe configuration improved host-to-device bandwidth by approximately 4.0x on the MI210 system and 4.5x on the W7900 system. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
 
 The numbers in this write-up are all from these two machines as I had them configured. They are meant to show a debugging method and the shape of the problem, not to serve as a benchmark of the GPUs or CPUs involved. Your own results will depend on your board, CPU, BIOS, and slot layout.
 
@@ -33,16 +33,16 @@ The numbers in this write-up are all from these two machines as I had them confi
 
 ### What is a GPU doing in these machines?
 
-A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has hundreds of small compute cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's open-source software platform for GPU computing, including HPC and AI workloads.
+A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has many parallel compute units that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's open-source software platform for GPU computing, including HPC and AI workloads.
 
 ### How does data get to the GPU?
 
-The GPU has its own private memory (VRAM or HBM). Before the GPU can crunch a dataset, that data usually has to travel from the computer's main RAM, across a highway called **PCI Express (PCIe)**, into the GPU's VRAM. Think of PCIe as a multi-lane motorway between the CPU and the GPU. I was using discrete PCIe GPUs. On one system I had an AMD Instinct MI210 GPU, and on the other, an AMD Radeon PRO W7900 professional workstation GPU from the Navi3X family.
+The GPU has its own private memory (VRAM or HBM). Before the GPU can crunch a dataset, that data usually has to travel from the computer's main RAM, across a highway called **PCI Express (PCIe)**, into the GPU's VRAM. Think of PCIe as a multi-lane motorway between the CPU and the GPU. I was using discrete PCIe GPUs. On one system I had an AMD Instinct MI210 GPU, and on the other, an AMD Radeon PRO W7900 professional workstation GPU based on the AMD RDNA 3 architecture.
 
-- **Lanes (width):** PCIe comes in widths like x1, x4, x8, x16, which is literally how many parallel lanes the system bus (highway) has. Think of x16 is the full-width road, and x4 is only a quarter of it.
+- **Lanes (width):** PCIe comes in widths like x1, x4, x8, x16, which is literally how many parallel lanes the system bus (highway) has. Think of x16 as the full-width road, and x4 is only a quarter of it.
 - **Speed (generation):** Each PCIe "generation" (Gen3, Gen4, and so on) roughly doubles the speed per lane. Gen4 is twice as fast per lane as Gen3.
 
-So total bandwidth is roughly lanes times speed-per-lane. A full **Gen4 x16** link delivers around 26 GB/s in practice. A crippled **Gen3 x4** link delivers only about 3.5 GB/s, roughly one-seventh as much. That single fact turns out to be the villain of both stories below.
+So total bandwidth is roughly lanes times speed-per-lane. A Gen4 x16 connection has an approximate post-encoding data-rate ceiling of 31.5 GB/s per direction. Large pinned host-to-device copies commonly land in the high-20s GB/s once PCIe protocol, host-memory, and software overheads are included. A crippled **Gen3 x4** link delivers only about 3.5 GB/s. That single fact turns out to be the villain of both stories below.
 
 ### The key measuring tool
 
@@ -127,7 +127,7 @@ Base Board Information
 
 ### The symptom
 
-Copying 1 GB from CPU memory to the GPU took about 298 milliseconds every single time, which works out to a stubbornly fixed **3.6 GB/s**. For a data-centre GPU on a modern motherboard, that is dismal. I expected numbers north of 20 GB/s.
+Copying 1 GB from CPU memory to the GPU took about 298 milliseconds every single time, which works out to a stubbornly fixed **3.6 GB/s**. For a data-centre GPU on a modern motherboard, that is dismal. Before checking the complete platform topology, I expected substantially more than 3.6 GB/s.
 
 The most suspicious part was how *constant* it was. No matter what I changed, the answer came back 3.6 GB/s to the millisecond. In debugging, a result that refuses to move is itself a clue. It means something is imposing a hard ceiling, not a fluctuating one.
 
@@ -181,7 +181,7 @@ For reference, here is how each link type's approximate theoretical payload ceil
 | Gen4 x4  |                               7.88 GB/s |    6.3 GB/s |
 | Gen4 x16 |                              31.51 GB/s |   28.1 GB/s |
 
-Every measured number sits just under its theoretical ceiling, which is exactly what a healthy link should do once protocol overhead is accounted for. Knowing when you have hit a true platform limit is as important as fixing a fault.
+Each measurement falls within the expected ballpark for its negotiated PCIe generation and width. The remaining gap reflects PCIe protocol overhead as well as host-memory, benchmark, and software-stack effects. Knowing when you have hit a true platform limit is as important as fixing a fault.
 
 ### A bonus fix along the way: the RAM layout
 
@@ -203,7 +203,7 @@ The diagrams below show the memory layout before and after. Each of the 8 slots 
 
 ### The setup
 
-This machine uses an **ASUS TUF GAMING X570-PLUS (WI-FI) motherboard**, a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900** professional workstation GPU, https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html . Having just learned the lessons from the desk machine, I knew exactly what to check.
+This machine uses an **ASUS TUF GAMING X570-PLUS (WI-FI) motherboard**, a **Ryzen 7 3700X**, a Zen 2-based desktop CPU with PCIe 4.0 support, and an **AMD Radeon PRO W7900** professional workstation GPU, https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html . Having just learned the lessons from the desk machine, I knew exactly what to check.
 
 The board reports itself as:
 
@@ -217,7 +217,7 @@ Base Board Information
 
 ### The symptom
 
-The CPU-to-GPU copy ran at **6.3 GB/s**. Better than desk's original number, but still far below the roughly 26 GB/s a Gen4 x16 link should give. Same family of problem, different machine.
+The CPU-to-GPU copy ran at **6.3 GB/s**. Better than desk's original number, but still far below the high-20s GB/s a Gen4 x16 link typically delivers. Same family of problem, different machine.
 
 ### The investigation, now much faster
 
@@ -258,7 +258,7 @@ Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once
 [WARN] Large BAR is not enabled for GPU 0 in BIOS. Large BAR is required to enable multi-gpu data access
 ```
 
-Notice the warning at the bottom. The copy itself is now healthy at full Gen4 x16, but TransferBench is telling me Large BAR is off in the BIOS. That does not hurt this single host-to-GPU copy, but it becomes relevant the moment I try to get two GPUs talking to each other, which is the next thing I tried.
+Notice the warning at the bottom. The copy itself is running at full Gen4 x16, but TransferBench is reporting that Large BAR is off in the BIOS. The absence of Large BAR did not prevent this particular host-to-GPU test from reaching 28.1 GB/s, although it remained relevant to the subsequent peer-access experiment. Worth noting: Above 4G Decoding was enabled, but TransferBench still reported that Large BAR was unavailable. Above 4G Decoding and Resizable BAR are related platform capabilities, but enabling the former does not necessarily enable the latter.
 
 ### A second lesson: a fast card in the wrong slot
 
@@ -291,7 +291,7 @@ A few points worth keeping straight:
 
 **5. Know when you've hit a real limit.** On desk I stopped at 14.35 GB/s because this platform tops out at Gen3, both the EPYC 7251 and the MZ01-CE0 slot specifications cap it there, regardless of the MI210's own Gen4 capability. Recognising a true hardware ceiling, instead of burning hours chasing a setting that cannot exist, is a mark of engineering maturity.
 
-**6. Understand the platform's design intent.** Consumer boards give you one full-speed slot and route the rest through the chipset. Data-centre platforms like Instinct are built for many GPUs talking directly over dedicated interconnects such as xGMI. Knowing what a machine was designed to do tells you what is worth attempting on it.
+**6. Understand the platform's design intent.** Desktop motherboards, workstation platforms, and multi-GPU accelerator servers expose very different PCIe and peer-connectivity topologies. Some Instinct server designs provide dedicated Infinity Fabric links between GPUs, while conventional desktop systems generally rely on PCIe and motherboard-specific routing. Knowing what a machine was designed to do tells you what is worth attempting on it.
 
 ---
 
