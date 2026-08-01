@@ -149,21 +149,10 @@ I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lowe
 - Direct GPU-to-GPU transfer on this class of hardware needs a special interconnect called **xGMI (Infinity Fabric)**, which workstation and consumer cards do not have between them, so they can only talk through the CPU. ROCm reported the link as unsupported.
 - A feature called **Resizable BAR (Large BAR)**, which lets the CPU see all of a GPU's memory at once, was not available in this board's BIOS, and that independently blocks multi-GPU data sharing.
 
-The takeaway is that high-speed multi-GPU cooperation is a *data-centre* capability, which is exactly what the desk machine's Instinct line is built for, and not something a consumer board can improvise. Recognising the limits of a platform saves you from chasing a fix that cannot exist.
 
 ---
 
-## Side-by-side summary
 
-| Aspect | desk (MI210) | dev (W7900) |
-|---|---|---|
-| Root cause | BIOS bifurcation to x4 | Wrong physical slot at x4 |
-| Before | 3.6 GB/s (Gen3 x4) | 6.3 GB/s (Gen4 x4) |
-| After | 14.35 GB/s (Gen3 x16) | 28.1 GB/s (Gen4 x16) |
-| Improvement | about 4x | about 4.5x |
-| Limiting factor | Gen3 CPU (Naples) | None, fully optimal |
-
----
 
 ## The engineering lessons
 
