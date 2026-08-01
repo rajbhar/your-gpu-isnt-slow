@@ -14,7 +14,7 @@ Today I set up two workstation-class GPU machines for AMD ROCm compute, and each
 
 The numbers in this write-up are all from these two machines as I had them configured. They are meant to show a debugging method and the shape of the problem, not to serve as a benchmark of the GPUs or CPUs involved. Your own results will depend on your board, CPU, BIOS, and slot layout.
 
-> **The one idea to take away:** A GPU can be perfectly healthy and still deliver terrible performance if the *path* between the CPU and the GPU is degraded. Most of this write-up is about learning to inspect that path, link by link, instead of blaming the GPU.
+> **The one idea to take away:** A GPU can be working correctly and still deliver terrible performance if the *path* between the CPU and the GPU is degraded. Most of this write-up is about learning to inspect that path, link by link, instead of blaming the GPU.
 
 ---
 
@@ -22,11 +22,11 @@ The numbers in this write-up are all from these two machines as I had them confi
 
 ### What is a GPU doing in these machines?
 
-A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has hundreds of small compute cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's open software stack for GPU compute, letting programmers run general-purpose computing code on AMD GPUs.
+A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has hundreds of small compute cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's open-source software platform for GPU computing, including HPC and AI workloads.
 
 ### How does data get to the GPU?
 
-The GPU has its own private memory (VRAM or HBM). Before the GPU can crunch a dataset, that data usually has to travel from the computer's main RAM, across a highway called **PCI Express (PCIe)**, into the GPU's VRAM. Think of PCIe as a multi-lane motorway between the CPU and the GPU. I was using discrete PCIe GPUs. On one system I had AMD Instinct MI210 GPU and on other, I had Radeon PRO W7900 consumer card from Navi3X family.
+The GPU has its own private memory (VRAM or HBM). Before the GPU can crunch a dataset, that data usually has to travel from the computer's main RAM, across a highway called **PCI Express (PCIe)**, into the GPU's VRAM. Think of PCIe as a multi-lane motorway between the CPU and the GPU. I was using discrete PCIe GPUs. On one system I had an AMD Instinct MI210 GPU, and on the other, an AMD Radeon PRO W7900 professional workstation GPU from the Navi3X family.
 
 - **Lanes (width):** PCIe comes in widths like x1, x4, x8, x16, which is literally how many parallel lanes the system bus (highway) has. Think of x16 is the full-width road, and x4 is only a quarter of it.
 - **Speed (generation):** Each PCIe "generation" (Gen3, Gen4, and so on) roughly doubles the speed per lane. Gen4 is twice as fast per lane as Gen3.
@@ -37,7 +37,7 @@ So total bandwidth is roughly lanes times speed-per-lane. A full **Gen4 x16** li
 
 I used a benchmark called **TransferBench** that copies a chunk of data from CPU memory to the GPU and reports the achieved speed in gigabytes per second (GB/s). I also leaned heavily on a Linux command, `lspci`, which lets you inspect every device on the PCIe bus and, most importantly, ask each link what speed and width it is actually running at right now.
 
-> **Two numbers that matter in `lspci`:** `LnkCap` = the link's maximum capability (what it *could* do). `LnkSta` = the link's current status (what it is *actually* doing). When `LnkSta` is worse than `LnkCap` and says "(downgraded)", you've found a weak link in the chain.
+> **How to read `LnkCap` vs `LnkSta`:** `LnkCap` tells you what an endpoint or port can support. `LnkSta` tells you the speed and width currently negotiated on that particular link. Always inspect the endpoint and every upstream port in the topology. A lower-than-expected `LnkSta` is an important clue, but it may reflect intentional slot wiring, bifurcation, a platform limitation, or a genuinely degraded link.
 
 ### A closer look at TransferBench
 
@@ -55,7 +55,7 @@ The source and destination (the memory) use `G` for GPU memory, and for host mem
 
 - `C` — pinned host memory
 - `B` — coherent pinned host memory
-- `D` — non-coherent pinned host memory (usually the fastest for bulk copies into the GPU)
+- `D` — non-coherent pinned host memory (in these experiments, the highest measured throughput for bulk copies into the GPU)
 - `K` — uncached pinned host memory
 - `H` — unpinned host memory (the slow one)
 - `P` — pinned host memory that auto-lands on the NUMA node closest to the GPU
@@ -92,6 +92,8 @@ $ ./TransferBench cmdline 1G "1 4 (C1->C1->C2)"
 
 The documentation is at https://rocm.docs.amd.com/projects/TransferBench, and the source plus build instructions are on GitHub at https://github.com/ROCm/TransferBench.
 
+One caveat worth flagging: the current TransferBench documentation notes it is tested on supported AMD Instinct GPUs but not on Radeon GPUs. The W7900 numbers here are still useful, but treat them as results observed in my configuration rather than an officially validated TransferBench characterization.
+
 ---
 
 ## Machine 1: "desk", the AMD Instinct MI210 server
@@ -112,16 +114,16 @@ Good debugging is mostly elimination. Form a hypothesis, test it cheaply, cross 
 
 1. **Is it the copy engine?** GPUs can copy data using either dedicated DMA hardware or their compute cores. I tried both. Both gave 3.6 GB/s. *Ruled out.*
 2. **Is it the type of memory?** There are several kinds of host memory (pinned, coherent, non-coherent, and so on). I swept through all of them. Every one came back at the identical 3.6 GB/s. *Ruled out.*
-3. **Is it the security and translation layer (IOMMU)?** The IOMMU can translate addresses on every transfer and slow things down. I switched it to "passthrough" mode. No change. *Ruled out*, though I kept passthrough on since it is the correct setting for a compute box.
+3. **Is it the security and translation layer (IOMMU)?** The IOMMU can translate addresses on every transfer. I switched it to "passthrough" mode and H2D bandwidth did not materially change, so the IOMMU was not the limiting factor here. *Ruled out.* One caveat worth noting: IOMMU configuration is workload-dependent, and Radeon PCIe P2P configurations may have different requirements from an Instinct compute configuration.
 4. **Is the GPU asleep?** I watched the GPU's power and clocks during a transfer. It drew only about 50 W, barely above idle, so I forced maximum clocks anyway. Still 3.6 GB/s. *Ruled out.*
 5. **Is the memory layout wrong (NUMA)?** This server splits its RAM into four "NUMA nodes", which you can think of as memory neighbourhoods. I found that the GPU's nearest neighbourhood had *no RAM installed in it at all*, forcing every transfer to reach into a distant neighbourhood. I fixed the RAM layout (shown below), which was genuinely worth doing, but it *still* did not move the 3.6 GB/s. Not the root cause, but good hygiene.
-6. **Is the GPU itself broken?** I ran a copy that stays entirely inside the GPU, VRAM to VRAM. It hit **144 GB/s**. The GPU was perfectly healthy, which meant the problem had to live specifically on the road *between* CPU and GPU.
+6. **Is the GPU itself the bottleneck?** I ran a copy that stays entirely inside the GPU, VRAM to VRAM. It hit **144 GB/s**. That substantially higher GPU-local copy result made a gross GPU-local memory bottleneck unlikely and directed the investigation toward the host interface.
 
-> **The turning point:** The on-GPU copy was fast (144 GB/s) but every CPU-to-GPU copy was slow (3.6 GB/s). That told me the fault was in the PCIe path, not the GPU. So I stopped poking at software and started inspecting the physical link, bridge by bridge.
+> **The turning point:** The GPU-local copy was fast (144 GB/s) but every CPU-to-GPU copy was slow (3.6 GB/s). That pointed at the PCIe path rather than the GPU. So I stopped poking at software and started inspecting the physical link, port by port.
 
 ### Following the chain with `lspci`
 
-A GPU is not wired straight to the CPU. The connection passes through one or more PCIe "bridges", which act like junctions on the motorway. I checked each junction's `LnkSta`. The GPU's own connector reported a healthy Gen4 x16. But one junction upstream told a very different story:
+A GPU is not wired straight to the CPU. The connection passes through one or more PCIe "bridges", which act like junctions on the motorway. I checked each junction's `LnkSta`. The GPU's own endpoint reported Gen4 x16. But a port upstream in the path told a different story:
 
 ```
 $ sudo lspci -vvv -s 03:00.0 | grep -iE 'LnkCap:|LnkSta:'
@@ -130,17 +132,17 @@ LnkSta: Speed 8GT/s (downgraded),        <- but actually running
         Width x4 (downgraded)               Gen3 and only x4 !!
 ```
 
-There it was. One junction on the road to the GPU had quietly trained down to **Gen3 x4**, a quarter of the lanes at half the speed. Gen3 x4's real-world ceiling is about 3.5 to 3.9 GB/s, which matches our 3.6 GB/s *exactly*. Mystery solved.
+There it was. The path to the GPU was configured as **Gen3 x4**, a quarter of the lanes at half the speed. Gen3 x4's real-world ceiling is about 3.5 to 3.9 GB/s, which matches my 3.6 GB/s *exactly*. Mystery solved.
 
 ### The fix
 
 Why would a link run at x4 when it can do x16? On this board the culprit was a BIOS setting called **PCIe bifurcation**. Bifurcation lets one physical x16 slot be split into smaller pieces (x4+x4+x4+x4) so you can plug in several small devices. The slot holding the GPU had been left on an automatic setting that split it down to x4. I went into the BIOS and forced the GPU's slot (labelled PCIE_1) to **x16**.
 
-After a reboot, that junction reported full width, and the benchmark jumped:
+After a reboot, the path reported full width, and the benchmark jumped:
 
 | Stage | Link state | CPU to GPU bandwidth |
 |---|---|---|
-| Before | Gen3 x4 (downgraded) | 3.6 GB/s |
+| Before | Gen3 x4 (bifurcated) | 3.6 GB/s |
 | After forcing slot to x16 | Gen3 x16 | **14.35 GB/s** |
 
 ### Why it stopped at 14.35 GB/s, and why that is fine
@@ -160,7 +162,7 @@ Every measured number sits just under its theoretical ceiling, which is exactly 
 
 ### A bonus fix along the way: the RAM layout
 
-While digging around, I noticed only 4 of the 8 memory slots were filled, and in a pattern that left the GPU's own memory neighbourhood empty. I added 4 more matching DIMMs to fill all 8 channels. One subtle detail is worth calling out: this machine mixed two RAM brands (Kingston and SK Hynix), so I kept **each channel-pair the same brand** so the memory would train reliably. With every channel populated, the system sensibly merged into a single, balanced 128 GB memory pool.
+While digging around, I noticed only 4 of the 8 memory slots were filled, and in a pattern that left the GPU's own memory neighbourhood empty. I added 4 more matching DIMMs to fill all 8 channels. One subtle detail is worth calling out: this machine mixed two RAM brands (Kingston and SK Hynix), so I kept **each channel-pair the same brand** so the memory would train reliably. Populating all eight channels produced a balanced 128 GB configuration and gave each NUMA domain its own local memory capacity. (The number of NUMA nodes Linux actually exposes depends separately on the BIOS NPS and memory-interleaving settings.)
 
 The diagrams below show the memory layout before and after. Each of the 8 slots (labelled A0 to H0) belongs to a "quadrant", a pair of channels that forms one memory neighbourhood (NUMA node):
 
@@ -178,7 +180,7 @@ The diagrams below show the memory layout before and after. Each of the 8 slots 
 
 ### The setup
 
-This machine uses a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900** https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html , a high-end workstation GPU. Having just learned the lessons from the desk machine, I knew exactly what to check.
+This machine uses a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900** professional workstation GPU, https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html . Having just learned the lessons from the desk machine, I knew exactly what to check.
 
 ### The symptom
 
@@ -186,7 +188,7 @@ The CPU-to-GPU copy ran at **6.3 GB/s**. Better than desk's original number, but
 
 ### The investigation, now much faster
 
-I went straight to the PCIe chain with `lspci`, and the pattern was familiar. The W7900's own connector reported Gen4 x16, but a junction above it had downgraded:
+I went straight to the PCIe chain with `lspci`, and the pattern was familiar. The W7900's own endpoint reported Gen4 x16, but a port above it in the path reported a narrower width:
 
 ```
 GPU endpoint : Speed 16GT/s, Width x16   <- healthy Gen4 x16
@@ -194,17 +196,17 @@ bridge above : Speed 16GT/s,             <- full Gen4 SPEED, but...
                Width x4 (downgraded)        only x4 WIDTH
 ```
 
-Notice the difference from desk. Here the *speed* was full Gen4, but the *width* was only x4. Gen4 x4 works out to about 6 to 7 GB/s, matching our 6.3 GB/s. The cause this time was not a BIOS split. It was **which physical slot the card was plugged into**.
+Notice the difference from desk. Here the *speed* was full Gen4, but the *width* was only x4. Gen4 x4 works out to about 6 to 7 GB/s, matching my 6.3 GB/s. The cause this time was not a BIOS split. It was **which physical slot the card was plugged into**.
 
 > **A key fact about desktop (consumer) motherboards:** A desktop CPU like the 3700X has a limited number of PCIe lanes. Typically **only the top slot (nearest the CPU) is wired for the full x16** directly to the CPU. Lower slots are routed through a secondary chip (the "chipset") and often run at just x4. The GPU had been installed in one of those lower, slower slots.
 
 ### The fix
 
-I powered down and moved the W7900 into the **top slot, directly connected to the CPU**. While in the BIOS I also enabled a helpful option called "Above 4G Decoding" and looked for "Resizable BAR", which comes up again below. After a reboot, the upstream junction finally reported full Gen4 x16, and the benchmark told the story:
+I powered down and moved the W7900 into the **top slot, directly connected to the CPU**. While in the BIOS I also enabled a helpful option called "Above 4G Decoding" and looked for "Resizable BAR", which comes up again below. After a reboot, the upstream port finally reported full Gen4 x16, and the benchmark told the story:
 
 | Stage | Link state | CPU to GPU bandwidth |
 |---|---|---|
-| Before (lower slot) | Gen4 x4 (downgraded) | 6.3 GB/s |
+| Before (lower slot) | Gen4 x4 (slot wired x4) | 6.3 GB/s |
 | After (top CPU slot) | Gen4 x16 | **28.1 GB/s** |
 
 That is approximately a **4.5x improvement**, and this time it reached the platform's true maximum of full Gen4 x16, because this CPU and its top slot both support Gen4.
@@ -223,16 +225,22 @@ Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once
 [WARN] Large BAR is not enabled for GPU 0 in BIOS. Large BAR is required to enable multi-gpu data access
 ```
 
-Notice the warning at the bottom. The copy itself is now healthy at full Gen4 x16, but TransferBench is telling me Large BAR is off in the BIOS. That does not hurt this single host-to-GPU copy, but it becomes the wall I run into the moment I try to get two GPUs talking to each other, which is the next thing I tried.
+Notice the warning at the bottom. The copy itself is now healthy at full Gen4 x16, but TransferBench is telling me Large BAR is off in the BIOS. That does not hurt this single host-to-GPU copy, but it becomes relevant the moment I try to get two GPUs talking to each other, which is the next thing I tried.
 
 ### A second lesson: a fast card in the wrong slot
 
-I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lower slot, and asked a natural question: can the two GPUs send data directly to each other ("peer-to-peer")? The answer was **no**, and understanding why is instructive.
+I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lower slot, and asked a natural question: can the two GPUs send data directly to each other ("peer-to-peer")? In this configuration, the answer was **no**, and it is worth being precise about why.
+
+This mixed W7900/WX 8200 configuration did not expose supported direct peer access. It helps to separate two things:
+
+- **Direct GPU peer access**, where one GPU maps or transfers directly into another's memory.
+- **Host-staged multi-GPU transfers**, which route through host memory and can still function even when direct peer access is unavailable.
+
+A few points worth keeping straight:
 
 - The older card, in the chipset-routed x4 slot, could only manage about 3.3 GB/s to the CPU, the same width limit as before, now expected rather than mysterious.
-- Direct GPU-to-GPU transfer on this class of hardware needs a special interconnect called **xGMI (Infinity Fabric)**, which workstation and consumer cards do not have between them, so they can only talk through the CPU. ROCm reported the link as unsupported.
-- A feature called **Resizable BAR (Large BAR)**, which lets the CPU see all of a GPU's memory at once, was not available in this board's BIOS, and that independently blocks multi-GPU data sharing. This is exactly the warning TransferBench printed above.
-
+- PCIe P2P can operate without xGMI on supported GPU and platform combinations, but it depends on topology, Large BAR support, firmware, and runtime configuration. xGMI provides a dedicated high-bandwidth GPU interconnect on supported AMD Instinct platforms; it is not a universal prerequisite for GPU peer access.
+- Large BAR (Resizable BAR) was not enabled in this board's BIOS, which is exactly the warning TransferBench printed above. Large BAR limitations can prevent direct peer mapping, but that does not mean all multi-GPU communication is impossible: host-staged transfers can still work.
 
 ---
 
@@ -240,17 +248,17 @@ I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lowe
 
 ## The engineering lessons
 
-**1. Don't blame the obvious suspect first.** The GPU was healthy on both machines, moving data internally at 144 GB/s. The fault was always in the connection. Test a component in isolation before you assume it is broken.
+**1. Don't blame the obvious suspect first.** On both machines the GPU-local copy was fast (144 GB/s on desk), which pointed away from the GPU and toward the connection. Test a component in isolation before you assume it is the bottleneck.
 
 **2. A constant, stubborn result is a clue.** On desk, the bandwidth stayed at 3.6 GB/s no matter what I changed. That refusal to budge was itself the signal. It pointed at a hard physical ceiling rather than any software setting.
 
-**3. Inspect the whole path, not just the endpoints.** The GPU's own PCIe connector looked perfect on both machines. The degraded link was always *upstream*, on a bridge somewhere in between. Checking only the GPU would have found nothing wrong. Follow the chain link by link.
+**3. Inspect the whole path, not just the endpoints.** The GPU's own PCIe endpoint looked correct on both machines. The reduced width or speed always showed up *upstream* in the path, whether from slot wiring, bifurcation, or a platform limit, not at the card itself. Checking only the GPU would have found nothing wrong. Follow the chain link by link.
 
 **4. Match the symptom's number to a known cause.** 3.6 GB/s is Gen3 x4. 6.3 GB/s is Gen4 x4. 14 GB/s is Gen3 x16. 28 GB/s is Gen4 x16. Once you know these rough figures, a benchmark result translates straight into a physical diagnosis. (These are the ballpark figures I saw on my machines; treat them as rules of thumb, not exact specs.)
 
 **5. Know when you've hit a real limit.** On desk I stopped at 14.35 GB/s because this platform tops out at Gen3, both the EPYC 7251 and the MZ01-CE0 slot specifications cap it there, regardless of the MI210's own Gen4 capability. Recognising a true hardware ceiling, instead of burning hours chasing a setting that cannot exist, is a mark of engineering maturity.
 
-**6. Understand the platform's design intent.** Consumer boards give you one full-speed slot and route the rest through the chipset. Data-centre platforms are built for many GPUs talking directly over xGMI. Knowing what a machine was designed to do tells you what is worth attempting on it.
+**6. Understand the platform's design intent.** Consumer boards give you one full-speed slot and route the rest through the chipset. Data-centre platforms like Instinct are built for many GPUs talking directly over dedicated interconnects such as xGMI. Knowing what a machine was designed to do tells you what is worth attempting on it.
 
 ---
 
