@@ -75,7 +75,7 @@ The simplified syntax begins with two counts: `#Transfers #SEs (SRC->EXECUTOR->D
 
 Yes, the letter `D` shows up in two places with two meanings. In the middle it is the DMA engine; on either end it is non-coherent pinned host memory. Context tells them apart. If you ever forget the letters your particular build supports, run `./TransferBench` with no arguments and it prints your machine's topology along with the memory types it knows about. Older builds expose fewer, so it is worth a quick check.
 
-Here is a 1 GB copy from host into the MI210, driven by the DMA engine, taken after the slot was fixed:
+Here is a 1 GiB copy from host into the MI210, driven by the DMA engine, taken after the slot was fixed:
 
 ```
 $ ./TransferBench cmdline 1G "1 1 (D0->D0->G0)"
@@ -127,7 +127,7 @@ Base Board Information
 
 ### The symptom
 
-Copying 1 GB from CPU memory to the GPU took about 298 milliseconds every single time, which works out to a stubbornly fixed **3.6 GB/s**. For a data-centre GPU on a modern motherboard, that is dismal. Before checking the complete platform topology, I expected substantially more than 3.6 GB/s.
+Copying 1 GiB from CPU memory to the GPU took about 298 milliseconds every single time, which works out to a stubbornly fixed **3.6 GB/s**. For a data-centre GPU on a modern motherboard, that is dismal. Before checking the complete platform topology, I expected substantially more than 3.6 GB/s.
 
 The most suspicious part was how *constant* it was. No matter what I changed, the answer came back 3.6 GB/s to the millisecond. In debugging, a result that refuses to move is itself a clue. It means something is imposing a hard ceiling, not a fluctuating one.
 
@@ -247,7 +247,7 @@ I powered down and moved the W7900 into the **top slot, directly connected to th
 
 That is approximately a **4.5x improvement**, and this time it reached the platform's true maximum of full Gen4 x16, because this CPU and its top slot both support Gen4.
 
-Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once the card was in the top slot. Here `ROCR_VISIBLE_DEVICES=1` exposes physical GPU 1 as logical GPU 0 to the process, which is why the TransferBench expression uses `G0`:
+Here is the run that confirmed it, a 1 GiB DMA copy from host into the W7900 once the card was in the top slot. Here `ROCR_VISIBLE_DEVICES=1` exposes physical GPU 1 as logical GPU 0 to the process, which is why the TransferBench expression uses `G0`:
 
 ```
 :~/TransferBench$ ROCR_VISIBLE_DEVICES=1 ./TransferBench cmdline 1G "1 1 (D0->D0->G0)"
