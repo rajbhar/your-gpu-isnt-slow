@@ -71,7 +71,9 @@ The source and destination (the memory) use `G` for GPU memory, and for host mem
 - `H` — unpinned host memory (the slow one)
 - `P` — pinned host memory that auto-lands on the NUMA node closest to the GPU
 
-Yes, the letter `D` shows up in two places with two meanings. In the middle it is the DMA engine; on either end it is non-coherent pinned host memory. Context tells them apart. The number sitting in front of the triplet is just how many sub-executors to use, meaning CPU threads, GPU compute units, or DMA streams depending on the engine. If you ever forget the letters your particular build supports, run `./TransferBench` with no arguments and it prints your machine's topology along with the memory types it knows about. Older builds expose fewer, so it is worth a quick check.
+The simplified syntax begins with two counts: `#Transfers #SEs (SRC->EXECUTOR->DST)`. In `1 4 (D0->G0->G0)`, the first `1` requests one transfer, while `4` selects four subexecutors for the chosen executor. For a CPU executor, subexecutors correspond to CPU threads; for a GPU-kernel executor, they control the parallel GPU execution used for the transfer.
+
+Yes, the letter `D` shows up in two places with two meanings. In the middle it is the DMA engine; on either end it is non-coherent pinned host memory. Context tells them apart. If you ever forget the letters your particular build supports, run `./TransferBench` with no arguments and it prints your machine's topology along with the memory types it knows about. Older builds expose fewer, so it is worth a quick check.
 
 Here is a 1 GB copy from host into the MI210, driven by the DMA engine, taken after the slot was fixed:
 
@@ -222,7 +224,7 @@ I powered down and moved the W7900 into the **top slot, directly connected to th
 
 That is approximately a **4.5x improvement**, and this time it reached the platform's true maximum of full Gen4 x16, because this CPU and its top slot both support Gen4.
 
-Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once the card was in the top slot:
+Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once the card was in the top slot. Here `ROCR_VISIBLE_DEVICES=1` exposes physical GPU 1 as logical GPU 0 to the process, which is why the TransferBench expression uses `G0`:
 
 ```
 :~/TransferBench$ ROCR_VISIBLE_DEVICES=1 ./TransferBench cmdline 1G "1 1 (D0->D0->G0)"
@@ -263,7 +265,7 @@ A few points worth keeping straight:
 
 **2. A constant, stubborn result is a clue.** On desk, the bandwidth stayed at 3.6 GB/s no matter what I changed. That refusal to budge was itself the signal. It pointed at a hard physical ceiling rather than any software setting.
 
-**3. Inspect the whole path, not just the endpoints.** The GPU's own PCIe endpoint looked correct on both machines. The reduced width or speed always showed up *upstream* in the path, whether from slot wiring, bifurcation, or a platform limit, not at the card itself. Checking only the GPU would have found nothing wrong. Follow the chain link by link.
+**3. Distinguish capability from negotiated state.** A device's `LnkCap` can look perfect while `LnkSta` reveals that the link is operating at a lower generation or width. Check the endpoint first, then trace the topology through each upstream port to determine whether the cause is slot wiring, bifurcation, a switch, or a platform limitation.
 
 **4. Match the symptom's number to a known cause.** 3.6 GB/s is Gen3 x4. 6.3 GB/s is Gen4 x4. 14 GB/s is Gen3 x16. 28 GB/s is Gen4 x16. Once you know these rough figures, a benchmark result translates straight into a physical diagnosis. (These are the ballpark figures I saw on my machines; treat them as rules of thumb, not exact specs.)
 
@@ -276,21 +278,28 @@ A few points worth keeping straight:
 ## Quick reference: useful commands
 
 ```bash
-# Check a PCIe device's capability vs. current link state
-sudo lspci -vvv -s <bus:dev.fn> | grep -iE 'LnkCap:|LnkSta:'
+# Display the PCIe topology
+lspci -tvnn
 
-# Find your GPU's PCIe address
-lspci -D | grep -iE 'VGA|Display|Radeon|Instinct'
+# Find GPU PCIe addresses
+lspci -Dnn | grep -iE 'VGA|Display|AMD/ATI'
 
-# Check the IOMMU mode
-cat /proc/cmdline
-sudo dmesg | grep -i 'Default domain type'
+# Replace this with the GPU's actual domain:bus:device.function
+BDF=0000:03:00.0
+
+# Compare capability with current negotiated state
+sudo lspci -vvv -s "$BDF" |
+    grep -iE 'LnkCap:|LnkSta:'
+
+# See which NUMA node the PCIe function is attached to
+cat "/sys/bus/pci/devices/$BDF/numa_node"
 
 # Inspect NUMA memory layout
 numactl --hardware
 
-# See which NUMA node a GPU is attached to
-cat /sys/class/drm/renderD128/device/numa_node
+# Check the IOMMU mode
+cat /proc/cmdline
+sudo dmesg | grep -i 'Default domain type'
 ```
 
 ---
