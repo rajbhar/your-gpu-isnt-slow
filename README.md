@@ -115,6 +115,16 @@ One caveat worth flagging: the current TransferBench documentation notes it is t
 
 This machine is built around a **Gigabyte MZ01-CE0 server motherboard**, a first-generation AMD EPYC "Naples" server CPU (model 7251), and an **AMD Instinct MI210**, see https://www.amd.com/en/products/accelerators/instinct/mi200/mi210.html - a serious data-centre compute GPU. Ubuntu 24.04 and ROCm 7.14 installed cleanly, the GPU was recognised, and code ran on it. See https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=instinct&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=mi210&gfx=gfx90a&w=compute 
 
+The board reports itself as:
+
+```
+$ sudo dmidecode -t baseboard
+Base Board Information
+        Manufacturer: GIGABYTE
+        Product Name: MZ01-CE0-00
+        Version: 01010101
+```
+
 ### The symptom
 
 Copying 1 GB from CPU memory to the GPU took about 298 milliseconds every single time, which works out to a stubbornly fixed **3.6 GB/s**. For a data-centre GPU on a modern motherboard, that is dismal. I expected numbers north of 20 GB/s.
@@ -193,7 +203,17 @@ The diagrams below show the memory layout before and after. Each of the 8 slots 
 
 ### The setup
 
-This machine uses a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900** professional workstation GPU, https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html . Having just learned the lessons from the desk machine, I knew exactly what to check.
+This machine uses an **ASUS TUF GAMING X570-PLUS (WI-FI) motherboard**, a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900** professional workstation GPU, https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html . Having just learned the lessons from the desk machine, I knew exactly what to check.
+
+The board reports itself as:
+
+```
+$ sudo dmidecode -t baseboard
+Base Board Information
+        Manufacturer: ASUSTeK COMPUTER INC.
+        Product Name: TUF GAMING X570-PLUS (WI-FI)
+        Version: Rev X.0x
+```
 
 ### The symptom
 
