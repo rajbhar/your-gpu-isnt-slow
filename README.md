@@ -1,4 +1,4 @@
-# Your GPU Isn't Slow. Your PCIe Slot Is.
+# Your GPU Isn't Slow. Your PCIe Path Is.
 
 *Two ROCm systems, two x4 bottlenecks, and up to 4.5x higher host-to-device bandwidth after fixing the PCIe topology.*
 
@@ -10,7 +10,7 @@
 
 ## What this is about
 
-Today I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was terribly slow. On one machine it ran about 7 times too slower than I expected, and on the other, more than 4 times too slow. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
+Today I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was well below what the link should sustain. Correcting the PCIe configuration improved host-to-device bandwidth by approximately 4.0x on the MI210 system and 4.5x on the W7900 system. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
 
 The numbers in this write-up are all from these two machines as I had them configured. They are meant to show a debugging method and the shape of the problem, not to serve as a benchmark of the GPUs or CPUs involved. Your own results will depend on your board, CPU, BIOS, and slot layout.
 
@@ -78,7 +78,7 @@ Now the same copy again, except I hand the work to the GPU's shader engines inst
 $ ./TransferBench cmdline 1G "1 4 (D0->G0->G0)"
 ```
 
-On this machine both come back at roughly 14.35 GB/s, and that agreement is the whole point. When the DMA path and the shader path post the same number, the engine is not your problem. The road underneath is, which here is the Gen3 x16 ceiling this old CPU imposes.
+On this machine both come back at roughly 14.35 GB/s, and that agreement is the whole point. When the DMA path and the shader path post the same number, the engine is not your problem. The road underneath is, which here is the Gen3 x16 ceiling this platform imposes.
 
 It is also handy to have a pure host-memory baseline with no GPU in the picture at all, just a CPU copy from one NUMA node to another. This is a good sanity check on your RAM and NUMA layout:
 
@@ -145,7 +145,18 @@ After a reboot, that junction reported full width, and the benchmark jumped:
 
 ### Why it stopped at 14.35 GB/s, and why that is fine
 
-Fixing the width quadrupled the bandwidth, but the speed was still stuck at Gen3 rather than Gen4. I checked the CPU model and found the answer: the EPYC **7251 is a first-generation "Naples" chip, and Naples only supports PCIe Gen3**. The motherboard and GPU are both Gen4-capable, but the CPU sets the ceiling. So **14.35 GB/s (Gen3 x16) is the genuine maximum this machine can reach**, and the only way past it would be a newer CPU. Knowing when you have hit a true hardware limit is as important as fixing a fault.
+After correcting the bifurcation configuration, the link operated at Gen3 x16 and H2D bandwidth increased from 3.6 to 14.35 GB/s. That result is consistent with the practical range of a Gen3 x16 connection. Although the MI210 endpoint supports PCIe 4.0 x16, both the EPYC 7251 and the published MZ01-CE0 slot specifications limit this platform to Gen3.
+
+For reference, here is how each link type's approximate theoretical payload ceiling compares with what I actually measured:
+
+| Link     | Approximate theoretical payload ceiling | Your result |
+| -------- | --------------------------------------: | ----------: |
+| Gen3 x4  |                               3.94 GB/s |    3.6 GB/s |
+| Gen3 x16 |                              15.75 GB/s |  14.35 GB/s |
+| Gen4 x4  |                               7.88 GB/s |    6.3 GB/s |
+| Gen4 x16 |                              31.51 GB/s |   28.1 GB/s |
+
+Every measured number sits just under its theoretical ceiling, which is exactly what a healthy link should do once protocol overhead is accounted for. Knowing when you have hit a true platform limit is as important as fixing a fault.
 
 ### A bonus fix along the way: the RAM layout
 
@@ -196,7 +207,7 @@ I powered down and moved the W7900 into the **top slot, directly connected to th
 | Before (lower slot) | Gen4 x4 (downgraded) | 6.3 GB/s |
 | After (top CPU slot) | Gen4 x16 | **28.1 GB/s** |
 
-That is roughly a **4.5x improvement**, and this time it reached the platform's true maximum of full Gen4 x16, because this CPU actually supports Gen4.
+That is approximately a **4.5x improvement**, and this time it reached the platform's true maximum of full Gen4 x16, because this CPU and its top slot both support Gen4.
 
 Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once the card was in the top slot:
 
@@ -237,7 +248,7 @@ I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lowe
 
 **4. Match the symptom's number to a known cause.** 3.6 GB/s is Gen3 x4. 6.3 GB/s is Gen4 x4. 14 GB/s is Gen3 x16. 28 GB/s is Gen4 x16. Once you know these rough figures, a benchmark result translates straight into a physical diagnosis. (These are the ballpark figures I saw on my machines; treat them as rules of thumb, not exact specs.)
 
-**5. Know when you've hit a real limit.** On desk I stopped at 14 GB/s because the CPU genuinely cannot do Gen4. Recognising a true hardware ceiling, instead of burning hours chasing a setting that cannot exist, is a mark of engineering maturity.
+**5. Know when you've hit a real limit.** On desk I stopped at 14.35 GB/s because this platform tops out at Gen3, both the EPYC 7251 and the MZ01-CE0 slot specifications cap it there, regardless of the MI210's own Gen4 capability. Recognising a true hardware ceiling, instead of burning hours chasing a setting that cannot exist, is a mark of engineering maturity.
 
 **6. Understand the platform's design intent.** Consumer boards give you one full-speed slot and route the rest through the chipset. Data-centre platforms are built for many GPUs talking directly over xGMI. Knowing what a machine was designed to do tells you what is worth attempting on it.
 
