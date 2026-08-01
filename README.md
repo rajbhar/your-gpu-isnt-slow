@@ -110,7 +110,7 @@ The diagrams below show the memory layout before and after. Each of the 8 slots 
 
 ### The setup
 
-This machine uses a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900**, a high-end workstation GPU. Having just learned the lessons from the desk machine, I knew exactly what to check.
+This machine uses a **Ryzen 7 3700X** desktop CPU (second-generation "Zen 2", which *does* support PCIe Gen4) and an **AMD Radeon PRO W7900** https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html , a high-end workstation GPU. Having just learned the lessons from the desk machine, I knew exactly what to check.
 
 ### The symptom
 
