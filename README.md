@@ -1,6 +1,8 @@
 # Your GPU Isn't Slow. Your PCIe Slot Is.
 
-*How I found and fixed hidden host-to-GPU bandwidth bottlenecks on two AMD ROCm rigs: a 4x speedup, explained from first principles.*
+*Two ROCm systems, two x4 bottlenecks, and up to 4.5x higher host-to-device bandwidth after fixing the PCIe topology.*
+
+> **Disclaimer:** This is a personal experiment from my own lab setup. Views are my own, and this is not official AMD guidance. Every performance number below comes from my two systems and my own measurements. Treat them as illustrative of these specific configurations, not as universal or representative results for the hardware named.
 
 > If you train models and your data loading feels sluggish, this one is for you.
 
@@ -10,6 +12,8 @@
 
 Today I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was terribly slow. On one machine it ran about 7 times too slower than I expected, and on the other, more than 4 times too slow. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
 
+The numbers in this write-up are all from these two machines as I had them configured. They are meant to show a debugging method and the shape of the problem, not to serve as a benchmark of the GPUs or CPUs involved. Your own results will depend on your board, CPU, BIOS, and slot layout.
+
 > **The one idea to take away:** A GPU can be perfectly healthy and still deliver terrible performance if the *path* between the CPU and the GPU is degraded. Most of this write-up is about learning to inspect that path, link by link, instead of blaming the GPU.
 
 ---
@@ -18,7 +22,7 @@ Today I set up two workstation-class GPU machines for AMD ROCm compute, and each
 
 ### What is a GPU doing in these machines?
 
-A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has hundreds of small compute cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's software stack that lets programmers run general-purpose computing code on AMD GPUs (it is AMD's answer to NVIDIA's CUDA).
+A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has hundreds of small compute cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's open software stack for GPU compute, letting programmers run general-purpose computing code on AMD GPUs.
 
 ### How does data get to the GPU?
 
@@ -231,7 +235,7 @@ I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lowe
 
 **3. Inspect the whole path, not just the endpoints.** The GPU's own PCIe connector looked perfect on both machines. The degraded link was always *upstream*, on a bridge somewhere in between. Checking only the GPU would have found nothing wrong. Follow the chain link by link.
 
-**4. Match the symptom's number to a known cause.** 3.6 GB/s is Gen3 x4. 6.3 GB/s is Gen4 x4. 14 GB/s is Gen3 x16. 28 GB/s is Gen4 x16. Once you know these rough figures, a benchmark result translates straight into a physical diagnosis.
+**4. Match the symptom's number to a known cause.** 3.6 GB/s is Gen3 x4. 6.3 GB/s is Gen4 x4. 14 GB/s is Gen3 x16. 28 GB/s is Gen4 x16. Once you know these rough figures, a benchmark result translates straight into a physical diagnosis. (These are the ballpark figures I saw on my machines; treat them as rules of thumb, not exact specs.)
 
 **5. Know when you've hit a real limit.** On desk I stopped at 14 GB/s because the CPU genuinely cannot do Gen4. Recognising a true hardware ceiling, instead of burning hours chasing a setting that cannot exist, is a mark of engineering maturity.
 
