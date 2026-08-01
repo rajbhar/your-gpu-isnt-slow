@@ -8,6 +8,17 @@
 
 ---
 
+## The short version
+
+| System                | Root cause                                 |   Before |      After | Improvement |
+| --------------------- | ------------------------------------------ | -------: | ---------: | ----------: |
+| MI210 + EPYC 7251     | Link configured at x4 instead of x16       | 3.6 GB/s | 14.35 GB/s |        4.0x |
+| W7900 + Ryzen 7 3700X | GPU installed in chipset-connected x4 slot | 6.3 GB/s |  28.1 GB/s |        4.5x |
+
+In both systems, the GPUs enumerated and ran workloads correctly. The failure was not functional; it was a silent reduction in available PCIe bandwidth. The rest of this write-up is how I found each one and confirmed the fix.
+
+---
+
 ## What this is about
 
 Today I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was well below what the link should sustain. Correcting the PCIe configuration improved host-to-device bandwidth by approximately 4.0x on the MI210 system and 4.5x on the W7900 system. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
