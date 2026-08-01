@@ -21,7 +21,7 @@ In both systems, the GPUs enumerated and ran workloads correctly. The failure wa
 
 ## What this is about
 
-Today I set up two AMD GPU compute systems for ROCm work, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was well below what the link should sustain. Correcting the PCIe configuration improved host-to-device bandwidth by approximately 4.0x on the MI210 system and 4.5x on the W7900 system. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
+In a recent lab session, I set up two AMD GPU compute systems for ROCm work, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was well below what the link should sustain. Correcting the PCIe configuration improved host-to-device bandwidth by approximately 4.0x on the MI210 system and 4.5x on the W7900 system. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
 
 The numbers in this write-up are all from these two machines as I had them configured. They are meant to show a debugging method and the shape of the problem, not to serve as a benchmark of the GPUs or CPUs involved. Your own results will depend on your board, CPU, BIOS, and slot layout.
 
@@ -91,7 +91,7 @@ Now the same copy again, except I hand the work to the GPU's shader engines inst
 $ ./TransferBench cmdline 1G "1 4 (D0->G0->G0)"
 ```
 
-On this machine both come back at roughly 14.35 GB/s, and that agreement is the whole point. When the DMA path and the shader path post the same number, the engine is not your problem. The road underneath is, which here is the Gen3 x16 ceiling this platform imposes.
+On this machine both come back at roughly 14.35 GB/s, and that agreement is the whole point. When the DMA and shader-driven paths produced essentially the same result, neither executor appeared to be the limiting factor; the shared PCIe path became the leading suspect. The road underneath is the ceiling here, which is the Gen3 x16 limit this platform imposes.
 
 It is also handy to have a pure host-memory baseline with no GPU in the picture at all, just a CPU copy from one NUMA node to another. This is a good sanity check on your RAM and NUMA layout:
 
@@ -324,4 +324,4 @@ sudo dmesg | grep -i 'Default domain type'
 
 ---
 
-*From "it works but it's slow" to a fully optimised, well-understood system, one link at a time.*
+*From "it works but it's slow" to a measured, well-understood PCIe path—one link at a time.*
