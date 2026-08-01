@@ -35,6 +35,59 @@ I used a benchmark called **TransferBench** that copies a chunk of data from CPU
 
 > **Two numbers that matter in `lspci`:** `LnkCap` = the link's maximum capability (what it *could* do). `LnkSta` = the link's current status (what it is *actually* doing). When `LnkSta` is worse than `LnkCap` and says "(downgraded)", you've found a weak link in the chain.
 
+### A closer look at TransferBench
+
+The benchmark I kept coming back to is **TransferBench** (it is open source, and lives at https://github.com/ROCm/TransferBench). It copies a chunk of data between any two devices you name, whether those are CPU memory nodes or GPUs, and reports the speed it actually achieved. What makes it the right tool for this particular hunt is that it lets you choose *which engine does the copying*. A GPU can move data from host memory using either its dedicated DMA copy engine or its shader (compute) engines, and being able to run the very same copy both ways is what let me separate a copy-engine problem from a link problem. This is the "Is it the copy engine?" test from Machine 1, made concrete.
+
+You describe a transfer as a little triplet, `SRC -> EXECUTOR -> DST`. The thing to hold onto when reading one is that the middle entry names an *engine*, while the two outer entries name *memory*.
+
+The executor (the mover) is one of:
+
+- `C` — CPU threads
+- `G` — the GPU shader engines
+- `D` — the GPU DMA engine
+
+The source and destination (the memory) use `G` for GPU memory, and for host memory there is a whole menu to pick from:
+
+- `C` — pinned host memory
+- `B` — coherent pinned host memory
+- `D` — non-coherent pinned host memory (usually the fastest for bulk copies into the GPU)
+- `K` — uncached pinned host memory
+- `H` — unpinned host memory (the slow one)
+- `P` — pinned host memory that auto-lands on the NUMA node closest to the GPU
+
+Yes, the letter `D` shows up in two places with two meanings. In the middle it is the DMA engine; on either end it is non-coherent pinned host memory. Context tells them apart. The number sitting in front of the triplet is just how many sub-executors to use, meaning CPU threads, GPU compute units, or DMA streams depending on the engine. If you ever forget the letters your particular build supports, run `./TransferBench` with no arguments and it prints your machine's topology along with the memory types it knows about. Older builds expose fewer, so it is worth a quick check.
+
+Here is a 1 GB copy from host into the MI210, driven by the DMA engine, taken after the slot was fixed:
+
+```
+$ ./TransferBench cmdline 1G "1 1 (D0->D0->G0)"
+
+ Executor: DMA 00 │ 14.299 GB/s │ 75.091 ms │ 1073741824 bytes │ 14.351 GB/s (sum)
+ Transfer 0       │ 14.351 GB/s │ 74.822 ms │ 1073741824 bytes │ D0 -> D0:1 -> G0
+ Aggregate (CPU)  │ 14.261 GB/s │ 75.290 ms │ 1073741824 bytes │ Overhead 0.199 ms
+```
+
+Now the same copy again, except I hand the work to the GPU's shader engines instead of the DMA engine. All I change is the middle letter, from `D0` to `G0`, and I ask for 4 compute units:
+
+```
+$ ./TransferBench cmdline 1G "1 4 (D0->G0->G0)"
+```
+
+On this machine both come back at roughly 14.35 GB/s, and that agreement is the whole point. When the DMA path and the shader path post the same number, the engine is not your problem. The road underneath is, which here is the Gen3 x16 ceiling this old CPU imposes.
+
+It is also handy to have a pure host-memory baseline with no GPU in the picture at all, just a CPU copy from one NUMA node to another. This is a good sanity check on your RAM and NUMA layout:
+
+```
+$ ./TransferBench cmdline 1G "1 4 (C1->C1->C2)"
+
+ Executor: CPU 01 │ 12.396 GB/s │ 86.621 ms │ 1073741824 bytes │ 12.417 GB/s (sum)
+ Transfer 0       │ 12.417 GB/s │ 86.472 ms │ 1073741824 bytes │ C1 -> C1:4 -> C2
+ Aggregate (CPU)  │ 12.373 GB/s │ 86.784 ms │ 1073741824 bytes │ Overhead 0.163 ms
+```
+
+The documentation is at https://rocm.docs.amd.com/projects/TransferBench, and the source plus build instructions are on GitHub at https://github.com/ROCm/TransferBench.
+
 ---
 
 ## Machine 1: "desk", the AMD Instinct MI210 server
