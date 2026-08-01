@@ -146,7 +146,7 @@ Good debugging is mostly elimination. Form a hypothesis, test it cheaply, cross 
 
 ### Following the chain with `lspci`
 
-A GPU is not wired straight to the CPU. The connection passes through one or more PCIe "bridges", which act like junctions on the motorway. I checked each junction's `LnkSta`. The GPU's own endpoint reported Gen4 x16. But a port upstream in the path told a different story:
+A PCIe GPU appears within a hierarchy: the GPU endpoint connects to an upstream or root port, and some systems add further bridges or switches. On the GPU function at `03:00.0`, `LnkCap` advertised support for Gen4 x16, while `LnkSta` showed that the link had actually negotiated Gen3 x4. I then traced the topology and BIOS configuration to determine why only four lanes were active:
 
 ```
 $ sudo lspci -vvv -s 03:00.0 | grep -iE 'LnkCap:|LnkSta:'
@@ -155,7 +155,7 @@ LnkSta: Speed 8GT/s (downgraded),        <- but actually running
         Width x4 (downgraded)               Gen3 and only x4 !!
 ```
 
-There it was. The path to the GPU was configured as **Gen3 x4**, a quarter of the lanes at half the speed. Gen3 x4's real-world ceiling is about 3.5 to 3.9 GB/s, which matches my 3.6 GB/s *exactly*. Mystery solved.
+There it was. The link had negotiated Gen3 x4. The x4 width was caused by the bifurcation configuration; Gen3 was the expected ceiling of this CPU and motherboard. Gen3 x4's real-world ceiling is about 3.5 to 3.9 GB/s, which matches my 3.6 GB/s *exactly*. Mystery solved.
 
 ### The fix
 
@@ -221,15 +221,15 @@ The CPU-to-GPU copy ran at **6.3 GB/s**. Better than desk's original number, but
 
 ### The investigation, now much faster
 
-I went straight to the PCIe chain with `lspci`, and the pattern was familiar. The W7900's own endpoint reported Gen4 x16, but a port above it in the path reported a narrower width:
+I went straight to the PCIe chain with `lspci`, and the pattern was familiar. I checked the W7900 while it was installed in the lower full-length slot. `LnkCap` showed that the card supported Gen4 x16, while `LnkSta` showed that the installed link was operating at Gen4 x4:
 
 ```
-GPU endpoint : Speed 16GT/s, Width x16   <- healthy Gen4 x16
-bridge above : Speed 16GT/s,             <- full Gen4 SPEED, but...
-               Width x4 (downgraded)        only x4 WIDTH
+$ sudo lspci -vvv -s <W7900-BDF> | grep -iE 'LnkCap:|LnkSta:'
+LnkCap: Speed 16GT/s, Width x16
+LnkSta: Speed 16GT/s, Width x4 (downgraded)
 ```
 
-Notice the difference from desk. Here the *speed* was full Gen4, but the *width* was only x4. Gen4 x4 works out to about 6 to 7 GB/s, matching my 6.3 GB/s. The cause this time was not a BIOS split. It was **which physical slot the card was plugged into**.
+Notice the difference from desk. Here the *speed* was full Gen4, but the *width* was only x4. Gen4 x4 works out to about 6 to 7 GB/s, matching my 6.3 GB/s. The motherboard specification explained why: the lower full-length slot is connected through the X570 chipset and is electrically limited to x4. The cause was not a BIOS split this time; it was **which physical slot the card was plugged into**.
 
 > **A key fact about desktop (consumer) motherboards:** A desktop CPU like the 3700X has a limited number of PCIe lanes. Typically **only the top slot (nearest the CPU) is wired for the full x16** directly to the CPU. Lower slots are routed through a secondary chip (the "chipset") and often run at just x4. The GPU had been installed in one of those lower, slower slots.
 
