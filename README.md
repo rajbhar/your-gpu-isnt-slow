@@ -37,7 +37,7 @@ I used a benchmark called **TransferBench** that copies a chunk of data from CPU
 
 ### A closer look at TransferBench
 
-The benchmark I kept coming back to is **TransferBench** (it is open source, and lives at https://github.com/ROCm/TransferBench). It copies a chunk of data between any two devices you name, whether those are CPU memory nodes or GPUs, and reports the speed it actually achieved. What makes it the right tool for this particular hunt is that it lets you choose *which engine does the copying*. A GPU can move data from host memory using either its dedicated DMA copy engine or its shader (compute) engines, and being able to run the very same copy both ways is what let me separate a copy-engine problem from a link problem. This is the "Is it the copy engine?" test from Machine 1, made concrete.
+**TransferBench**  is an open source tool, and lives at https://github.com/ROCm/TransferBench. It copies a chunk of data between any two devices you name, whether those are CPU memory nodes or GPUs, and reports the speed it actually achieved. What makes it the right tool for this particular hunt is that it lets you choose *which engine does the copying*. A GPU can move data from host memory using either its dedicated DMA copy engine or its shader (compute) engines, and being able to run the very same copy both ways is what let me separate a copy-engine problem from a link problem. This is the "Is it the copy engine?" test from Machine 1, made concrete.
 
 You describe a transfer as a little triplet, `SRC -> EXECUTOR -> DST`. The thing to hold onto when reading one is that the middle entry names an *engine*, while the two outer entries name *memory*.
 
