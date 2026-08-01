@@ -194,13 +194,29 @@ I powered down and moved the W7900 into the **top slot, directly connected to th
 
 That is roughly a **4.5x improvement**, and this time it reached the platform's true maximum of full Gen4 x16, because this CPU actually supports Gen4.
 
+Here is the run that confirmed it, a 1 GB DMA copy from host into the W7900 once the card was in the top slot:
+
+```
+:~/TransferBench$ ROCR_VISIBLE_DEVICES=1 ./TransferBench cmdline 1G "1 1 (D0->D0->G0)"
+-------------------┬--------------┬------------┬-------------------┬--------------------
+  Executor: DMA 00 │  28.110 GB/s │  38.198 ms │  1073741824 bytes │  28.257 GB/s (sum)
+-------------------┼--------------┼------------┼-------------------┼--------------------
+     Transfer 0    │  28.257 GB/s │  38.000 ms │  1073741824 bytes │ D0 -> D0:1 -> G0
+-------------------┼--------------┼------------┼-------------------┼--------------------
+   Aggregate (CPU) │  28.057 GB/s │  38.270 ms │  1073741824 bytes │ Overhead 0.072 ms
+-------------------┴--------------┴------------┴-------------------┴--------------------
+[WARN] Large BAR is not enabled for GPU 0 in BIOS. Large BAR is required to enable multi-gpu data access
+```
+
+Notice the warning at the bottom. The copy itself is now healthy at full Gen4 x16, but TransferBench is telling me Large BAR is off in the BIOS. That does not hurt this single host-to-GPU copy, but it becomes the wall I run into the moment I try to get two GPUs talking to each other, which is the next thing I tried.
+
 ### A second lesson: a fast card in the wrong slot
 
 I then installed a second, older GPU (a Radeon PRO WX 8200) in the now-free lower slot, and asked a natural question: can the two GPUs send data directly to each other ("peer-to-peer")? The answer was **no**, and understanding why is instructive.
 
 - The older card, in the chipset-routed x4 slot, could only manage about 3.3 GB/s to the CPU, the same width limit as before, now expected rather than mysterious.
 - Direct GPU-to-GPU transfer on this class of hardware needs a special interconnect called **xGMI (Infinity Fabric)**, which workstation and consumer cards do not have between them, so they can only talk through the CPU. ROCm reported the link as unsupported.
-- A feature called **Resizable BAR (Large BAR)**, which lets the CPU see all of a GPU's memory at once, was not available in this board's BIOS, and that independently blocks multi-GPU data sharing.
+- A feature called **Resizable BAR (Large BAR)**, which lets the CPU see all of a GPU's memory at once, was not available in this board's BIOS, and that independently blocks multi-GPU data sharing. This is exactly the warning TransferBench printed above.
 
 
 ---
