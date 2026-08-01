@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1180" height="520" viewBox="0 0 1180 520" font-family="Segoe UI, Helvetica, Arial, sans-serif">
 <rect width="1180" height="520" fill="#f6f7f9"/>
-<text x="30" y="44" font-size="30" font-weight="bold" fill="#1f4e79">desk - AFTER: all 8 slots filled (mixed brands done right)</text>
-<text x="30" y="76" font-size="19" fill="#5a636c">Same brand within each channel-pair; brands alternate across quadrants. Every quadrant now has RAM.</text>
+<text x="30" y="44" font-size="30" font-weight="bold" fill="#1f4e79">desk - AFTER: all 8 memory channels populated</text>
+<text x="30" y="76" font-size="19" fill="#5a636c">Balanced 128 GB population across all eight channels. Every quadrant now has local memory capacity.</text>
 <rect x="30" y="100" width="1120" height="250" rx="14" fill="#10331f"/>
 <rect x="470.0" y="116" width="240" height="40" rx="8" fill="#26313a" stroke="#3f5a48" stroke-width="2"/>
 <text x="590.0" y="142" font-size="20" font-weight="bold" fill="#cfe3d6" text-anchor="middle">EPYC CPU  —  Socket P0</text>
@@ -37,5 +37,6 @@
 <text x="64" y="382" font-size="18" fill="#282828">Kingston 16 GB</text>
 <rect x="254" y="366" width="20" height="20" rx="4" fill="#8a4bab" stroke="#d5a6ee" stroke-width="2"/>
 <text x="284" y="382" font-size="18" fill="#282828">SK Hynix 16 GB</text>
-<text x="34" y="416" font-size="19" fill="#5a636c">Result: with all channels populated, the system merged into one balanced 128 GB memory pool.</text>
+<text x="34" y="410" font-size="19" fill="#5a636c">Result: balanced memory capacity across all four NUMA quadrants.</text>
+<text x="34" y="436" font-size="19" fill="#5a636c">The topology exposed to Linux depends on BIOS NPS and memory-interleaving settings.</text>
 </svg>
