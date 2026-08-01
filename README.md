@@ -185,7 +185,7 @@ Each measurement falls within the expected ballpark for its negotiated PCIe gene
 
 ### A bonus fix along the way: the RAM layout
 
-While digging around, I noticed only 4 of the 8 memory slots were filled, and in a pattern that left the GPU's own memory neighbourhood empty. I added 4 more matching DIMMs to fill all 8 channels. One subtle detail is worth calling out: this machine mixed two RAM brands (Kingston and SK Hynix), so I kept **each channel-pair the same brand** so the memory would train reliably. Populating all eight channels produced a balanced 128 GB configuration and gave each NUMA domain its own local memory capacity. (The number of NUMA nodes Linux actually exposes depends separately on the BIOS NPS and memory-interleaving settings.)
+While digging around, I noticed only 4 of the 8 memory slots were filled, and in a pattern that left the GPU's own memory neighbourhood empty. I added 4 more matching DIMMs to fill all 8 channels. One subtle detail is worth calling out: this machine mixed two RAM brands (Kingston and SK Hynix). I kept each channel pair consistent, and the final 128 GB configuration trained successfully. Populating all eight channels gave each NUMA domain its own local memory capacity. (The number of NUMA nodes Linux actually exposes depends separately on the BIOS NPS and memory-interleaving settings.)
 
 The diagrams below show the memory layout before and after. Each of the 8 slots (labelled A0 to H0) belongs to a "quadrant", a pair of channels that forms one memory neighbourhood (NUMA node):
 
