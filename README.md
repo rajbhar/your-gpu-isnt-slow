@@ -8,7 +8,7 @@
 
 ## What this is about
 
-I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was badly slow. On one machine it ran about 7 times too slow, and on the other, more than 4 times too slow. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I have written it so a first-year engineering student can follow along with no prior knowledge of GPUs or PCIe.
+Today I set up two workstation-class GPU machines for AMD ROCm compute, and each one had the same kind of puzzling performance problem hiding inside it. Both machines could "see" their GPUs and run code just fine. But the speed of copying data *from the computer's main memory (RAM) into the GPU* was terribly slow. On one machine it ran about 7 times too slower than I expected, and on the other, more than 4 times too slow. If you train models, this is exactly the kind of thing that quietly caps your data-loading throughput while everything still looks healthy. The story of how I found and fixed each one is a small tour through how modern computers actually move data around, and I found it a fun debug exercise worth a weekend post.
 
 > **The one idea to take away:** A GPU can be perfectly healthy and still deliver terrible performance if the *path* between the CPU and the GPU is degraded. Most of this write-up is about learning to inspect that path, link by link, instead of blaming the GPU.
 
@@ -18,20 +18,20 @@ I set up two workstation-class GPU machines for AMD ROCm compute, and each one h
 
 ### What is a GPU doing in these machines?
 
-A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has thousands of small cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's software stack that lets programmers run general-purpose computing code on AMD GPUs (it is AMD's answer to NVIDIA's CUDA).
+A GPU (Graphics Processing Unit) is not just for graphics. It is a massively parallel calculator: it has hundreds of small compute cores that do maths at the same time, which makes it ideal for AI, simulation, and scientific computing. **ROCm** is AMD's software stack that lets programmers run general-purpose computing code on AMD GPUs (it is AMD's answer to NVIDIA's CUDA).
 
 ### How does data get to the GPU?
 
-The GPU has its own private memory (called VRAM). Before the GPU can crunch a dataset, that data usually has to travel from the computer's main RAM, across a highway called **PCI Express (PCIe)**, into the GPU's VRAM. Think of PCIe as a multi-lane motorway between the CPU and the GPU.
+The GPU has its own private memory (VRAM or HBM). Before the GPU can crunch a dataset, that data usually has to travel from the computer's main RAM, across a highway called **PCI Express (PCIe)**, into the GPU's VRAM. Think of PCIe as a multi-lane motorway between the CPU and the GPU. I was using discrete PCIe GPUs. On one system I had AMD Instinct MI210 GPU and on other, I had Radeon PRO W7900 consumer card from Navi3X family.
 
-- **Lanes (width):** PCIe comes in widths like x1, x4, x8, x16, which is literally how many parallel lanes the motorway has. x16 is the full-width road, and x4 is only a quarter of it.
+- **Lanes (width):** PCIe comes in widths like x1, x4, x8, x16, which is literally how many parallel lanes the system bus (highway) has. Think of x16 is the full-width road, and x4 is only a quarter of it.
 - **Speed (generation):** Each PCIe "generation" (Gen3, Gen4, and so on) roughly doubles the speed per lane. Gen4 is twice as fast per lane as Gen3.
 
 So total bandwidth is roughly lanes times speed-per-lane. A full **Gen4 x16** link delivers around 26 GB/s in practice. A crippled **Gen3 x4** link delivers only about 3.5 GB/s, roughly one-seventh as much. That single fact turns out to be the villain of both stories below.
 
 ### The key measuring tool
 
-I used a benchmark called **TransferBench** that copies a chunk of data from CPU memory to the GPU and reports the achieved speed in gigabytes per second (GB/s). I also leaned heavily on a Linux command, `lspci`, which lets you inspect every device on the PCIe motorway and, most importantly, ask each link what speed and width it is actually running at right now.
+I used a benchmark called **TransferBench** that copies a chunk of data from CPU memory to the GPU and reports the achieved speed in gigabytes per second (GB/s). I also leaned heavily on a Linux command, `lspci`, which lets you inspect every device on the PCIe bus and, most importantly, ask each link what speed and width it is actually running at right now.
 
 > **Two numbers that matter in `lspci`:** `LnkCap` = the link's maximum capability (what it *could* do). `LnkSta` = the link's current status (what it is *actually* doing). When `LnkSta` is worse than `LnkCap` and says "(downgraded)", you've found a weak link in the chain.
 
@@ -41,7 +41,7 @@ I used a benchmark called **TransferBench** that copies a chunk of data from CPU
 
 ### The setup
 
-This machine is built around a **Gigabyte MZ01-CE0 server motherboard**, a first-generation AMD EPYC "Naples" server CPU (model 7251), and an **AMD Instinct MI210**, a serious data-centre compute GPU. Ubuntu 24.04 and ROCm installed cleanly, the GPU was recognised, and code ran on it.
+This machine is built around a **Gigabyte MZ01-CE0 server motherboard**, a first-generation AMD EPYC "Naples" server CPU (model 7251), and an **AMD Instinct MI210**, see https://www.amd.com/en/products/accelerators/instinct/mi200/mi210.html - a serious data-centre compute GPU. Ubuntu 24.04 and ROCm 7.14 installed cleanly, the GPU was recognised, and code ran on it. See https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=instinct&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=mi210&gfx=gfx90a&w=compute 
 
 ### The symptom
 
