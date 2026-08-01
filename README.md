@@ -149,7 +149,7 @@ After correcting the bifurcation configuration, the link operated at Gen3 x16 an
 
 For reference, here is how each link type's approximate theoretical payload ceiling compares with what I actually measured:
 
-| Link     | Approximate theoretical payload ceiling | Your result |
+| Link     | Approximate theoretical payload ceiling | My result |
 | -------- | --------------------------------------: | ----------: |
 | Gen3 x4  |                               3.94 GB/s |    3.6 GB/s |
 | Gen3 x16 |                              15.75 GB/s |  14.35 GB/s |
