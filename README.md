@@ -113,7 +113,7 @@ One caveat worth flagging: the current TransferBench documentation notes it is t
 
 ### The setup
 
-This machine is built around a **Gigabyte MZ01-CE0 server motherboard**, a first-generation AMD EPYC "Naples" server CPU (model 7251), and an **AMD Instinct MI210**, see https://www.amd.com/en/products/accelerators/instinct/mi200/mi210.html - a serious data-centre compute GPU. Ubuntu 24.04 and ROCm 7.14 installed cleanly, the GPU was recognised, and code ran on it. See https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=instinct&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=mi210&gfx=gfx90a&w=compute 
+This machine is built around a **Gigabyte MZ01-CE0 server motherboard**, a first-generation AMD EPYC "Naples" server CPU (model 7251), and an **AMD Instinct MI210**, see https://www.amd.com/en/products/accelerators/instinct/mi200/mi210.html - a serious data-centre compute GPU. Ubuntu 24.04 and ROCm 7.14.0 installed cleanly, the GPU was recognised, and code ran on it. See https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=instinct&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=mi210&gfx=gfx90a&w=compute 
 
 The board reports itself as:
 
@@ -224,14 +224,17 @@ The CPU-to-GPU copy ran at **6.3 GB/s**. Better than desk's original number, but
 I went straight to the PCIe chain with `lspci`, and the pattern was familiar. I checked the W7900 while it was installed in the lower full-length slot. `LnkCap` showed that the card supported Gen4 x16, while `LnkSta` showed that the installed link was operating at Gen4 x4:
 
 ```
-$ sudo lspci -vvv -s <W7900-BDF> | grep -iE 'LnkCap:|LnkSta:'
+# Replace the value with the BDF reported by lspci
+W7900_BDF=0000:0e:00.0
+sudo lspci -vvv -s "$W7900_BDF" |
+    grep -iE 'LnkCap:|LnkSta:'
 LnkCap: Speed 16GT/s, Width x16
 LnkSta: Speed 16GT/s, Width x4 (downgraded)
 ```
 
 Notice the difference from desk. Here the *speed* was full Gen4, but the *width* was only x4. Gen4 x4 works out to about 6 to 7 GB/s, matching my 6.3 GB/s. The motherboard specification explained why: the lower full-length slot is connected through the X570 chipset and is electrically limited to x4. The cause was not a BIOS split this time; it was **which physical slot the card was plugged into**.
 
-> **A key fact about desktop (consumer) motherboards:** A desktop CPU like the 3700X has a limited number of PCIe lanes. Typically **only the top slot (nearest the CPU) is wired for the full x16** directly to the CPU. Lower slots are routed through a secondary chip (the "chipset") and often run at just x4. The GPU had been installed in one of those lower, slower slots.
+> **A key fact about this motherboard:** On the ASUS TUF GAMING X570-PLUS (WI-FI), the upper full-length slot is CPU-connected and supports x16 operation. The lower full-length slot is connected through the X570 chipset and is electrically limited to x4. Other motherboards use different lane-routing arrangements, so the slot table in the motherboard manual is the source of truth.
 
 ### The fix
 
@@ -274,6 +277,8 @@ A few points worth keeping straight:
 - The older card, in the chipset-routed x4 slot, could only manage about 3.3 GB/s to the CPU, the same width limit as before, now expected rather than mysterious.
 - PCIe P2P can operate without xGMI on supported GPU and platform combinations, but it depends on topology, Large BAR support, firmware, and runtime configuration. xGMI provides a dedicated high-bandwidth GPU interconnect on supported AMD Instinct platforms; it is not a universal prerequisite for GPU peer access.
 - Large BAR (Resizable BAR) was not enabled in this board's BIOS, which is exactly the warning TransferBench printed above. Large BAR limitations can prevent direct peer mapping, but that does not mean all multi-GPU communication is impossible: host-staged transfers can still work.
+
+One additional caveat is that the Radeon Pro WX 8200 is not listed among the officially supported Radeon families in the ROCm 7.14.0 compatibility matrix. This mixed-generation result should therefore be treated as an exploratory observation rather than a characterization of a supported ROCm P2P configuration.
 
 ---
 
